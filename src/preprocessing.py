@@ -1,15 +1,30 @@
 """
-Text Preprocessing Module for Indonesian NLP
-============================================
-Comprehensive pipeline for text cleaning, slang normalization, stopword removal,
-and stemming tailored for Indonesian conversational data.
+================================================================================
+MODUL: src/preprocessing.py
+DESKRIPSI: Pipeline Pra-Pemrosesan Teks Bahasa Indonesia (NLP Preprocessing)
+================================================================================
+
+Tujuan Ilmiah / Konsep Teori:
+-----------------------------
+Teks percakapan manusia (khususnya Bahasa Indonesia informal) memiliki banyak
+"derau" (noise) seperti kesalahan ejaan, tanda baca berlebih, singkatan/slang,
+dan kata hubung yang tidak membawa informasi niat (intent).
+
+Modul ini bertanggung jawab mengubah kalimat mentah menjadi bentuk baku:
+1. Case Folding & Base Cleaning: Menyeragamkan huruf kecil & menghapus URL/angka/simbol.
+2. Slang Normalization: Memetakan kata gaul/singkatan ke kata baku (contoh: "dmn" -> "dimana").
+3. Stopword Removal: Menghapus kata umum yang minim informasi pembeda.
+4. Stemming (Sastrawi): Mengubah kata berimbuhan ke bentuk kata dasarnya (opsional).
 """
 
 import re
 import string
 from typing import Dict, List, Optional, Union
 
-# Try importing Sastrawi components with safe fallback
+# -----------------------------------------------------------------------------
+# 1. PENGELOLAAN DEPENDENSI SASTRAWI
+# -----------------------------------------------------------------------------
+# Menggunakan safe import agar program tidak crash jika Sastrawi belum terinstal
 try:
     from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
     from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
@@ -18,7 +33,10 @@ except ImportError:
     SASTRAWI_AVAILABLE = False
 
 
-# Default Indonesian Stopwords fallback list
+# -----------------------------------------------------------------------------
+# 2. DAFTAR STOPWORDS BAHASA INDONESIA (FALLBACK LIST)
+# -----------------------------------------------------------------------------
+# Kumpulan kata hubung dan partikel umum yang dieliminasi jika tidak membawa makna spesifik intent.
 DEFAULT_INDONESIAN_STOPWORDS = {
     "ada", "adalah", "adanya", "adapun", "agak", "agar", "akan", "akankah", "akhir",
     "akhiri", "akhirnya", "aku", "akulah", "amat", "amatlah", "anda", "andalah", "antar",
@@ -47,7 +65,7 @@ DEFAULT_INDONESIAN_STOPWORDS = {
     "diperbuat", "diperbuatnya", "dipergunakan", "diperkirakan", "diperlihatkan", "diperlukan",
     "diperlukannya", "dipersoalkan", "dipertanyakan", "dipunyai", "diri", "dirinya",
     "disampaikan", "disebut", "disebutkan", "disebutkannya", "disini", "disinilah",
-    "disoalkan", "disuruh", "disampaikan", "ditambahkan", "ditandaskan", "ditanya",
+    "disoalkan", "disuruh", "ditambahkan", "ditandaskan", "ditanya",
     "ditanyai", "ditanyakan", "ditegaskan", "ditemukan", "ditemukannya", "diterima",
     "diterangkan", "ditujukan", "ditunjuk", "ditunjuki", "ditunjukkan", "ditunjukkannya",
     "ditunjuknya", "dituturkan", "dituturkannya", "diucapkan", "diucapkannya", "diungkapkan",
@@ -119,17 +137,39 @@ DEFAULT_INDONESIAN_STOPWORDS = {
     "waktu", "waktunya", "walau", "walaupun", "wong", "yaitu", "yakin", "yakni", "yang"
 }
 
-# Slang and Abbreviation Normalization Dictionary
+
+# -----------------------------------------------------------------------------
+# 3. KAMUS NORMALISASI SLANG / KATA GAUL / SINGKATAN PERCAKAPAN
+# -----------------------------------------------------------------------------
+# Mengapa normalisasi dilakukan sebelum stopword removal?
+# Agar singkatan seperti "dmn" -> "dimana" atau "kpn" -> "kapan" berhasil dipulihkan
+# ke bentuk kata aslinya terlebih dahulu sehingga vectorizer dapat mengenali fitur tersebut.
 DEFAULT_SLANG_DICT = {
+    # Kata Tanya & Partikel Arah
     "dmn": "dimana",
     "dgn": "dengan",
     "kpn": "kapan",
     "gmn": "bagaimana",
     "gimana": "bagaimana",
     "bkn": "bukan",
+    "bgmn": "bagaimana",
+    "brapa": "berapa",
+    "brp": "berapa",
+    "gmnkah": "bagaimanakah",
+
+    # Kata Ganti & Sapaan
     "sy": "saya",
     "km": "kamu",
     "yg": "yang",
+    "min": "admin",
+    "admin": "admin",
+    "kak": "kakak",
+    "gan": "juragan",
+    "bro": "saudara",
+    "sis": "saudari",
+    "y": "ya",
+
+    # Negasi & Slang Umum
     "tdk": "tidak",
     "gak": "tidak",
     "ngga": "tidak",
@@ -140,31 +180,14 @@ DEFAULT_SLANG_DICT = {
     "udh": "sudah",
     "sdh": "sudah",
     "blm": "belum",
-    "bisa": "bisa",
     "krn": "karena",
     "klo": "kalau",
     "kalo": "kalau",
     "kl": "kalau",
     "trs": "terus",
     "bgt": "banget",
-    "bgmn": "bagaimana",
-    "brapa": "berapa",
-    "brp": "berapa",
-    "gmnkah": "bagaimanakah",
-    "info": "informasi",
-    "pls": "tolong",
-    "tlg": "tolong",
-    "mhn": "mohon",
-    "makasih": "terima kasih",
-    "trims": "terima kasih",
-    "thx": "terima kasih",
-    "min": "admin",
-    "admin": "admin",
-    "kak": "kakak",
-    "gan": "juragan",
-    "bro": "saudara",
-    "sis": "saudari",
-    "y": "ya",
+
+    # Topik Pendidikan & Kampus
     "kmpus": "kampus",
     "kmpusnya": "kampus",
     "kmpusny": "kampus",
@@ -176,6 +199,13 @@ DEFAULT_SLANG_DICT = {
     "aj": "saja",
     "ad": "ada",
     "hrus": "harus",
+    "info": "informasi",
+    "pls": "tolong",
+    "tlg": "tolong",
+    "mhn": "mohon",
+    "makasih": "terima kasih",
+    "trims": "terima kasih",
+    "thx": "terima kasih",
     "jurusan": "program studi",
     "prodi": "program studi",
     "univ": "universitas",
@@ -185,10 +215,15 @@ DEFAULT_SLANG_DICT = {
 }
 
 
+# -----------------------------------------------------------------------------
+# 4. KELAS UTAMA: TextPreprocessor
+# -----------------------------------------------------------------------------
 class TextPreprocessor:
     """
-    Configurable Indonesian Text Preprocessor supporting case folding,
-    slang normalization, stopword filtering, and morphological stemming.
+    Kelas pemrosesan teks modular untuk Bahasa Indonesia.
+    
+    Menyediakan kontrol fleksibel untuk menghidupkan/mematikan komponen pra-pemrosesan
+    guna mendukung studi perbandingan ablasi (Eksperimen E0 vs E1).
     """
 
     def __init__(
@@ -201,6 +236,9 @@ class TextPreprocessor:
         stemming: bool = False,
         custom_slang_dict: Optional[Dict[str, str]] = None
     ):
+        """
+        Inisialisasi konfigurasi pipeline pembersihan.
+        """
         self.case_folding = case_folding
         self.remove_punctuation = remove_punctuation
         self.remove_numbers = remove_numbers
@@ -208,20 +246,23 @@ class TextPreprocessor:
         self.stopword_removal = stopword_removal
         self.stemming = stemming
 
+        # Gunakan kamus kustom jika diberikan, atau gunakan kamus bawaan
         self.slang_dict = custom_slang_dict or DEFAULT_SLANG_DICT
+
+        # Lazy loading objek Sastrawi agar inisialisasi awal tetap instan
         self._stemmer = None
         self._stopword_remover = None
         self._stopwords_set = None
 
     def _get_stemmer(self):
-        """Lazy load Sastrawi Stemmer."""
+        """Lazy loader untuk objek Sastrawi Stemmer."""
         if self._stemmer is None and SASTRAWI_AVAILABLE:
             factory = StemmerFactory()
             self._stemmer = factory.create_stemmer()
         return self._stemmer
 
     def _get_stopwords(self) -> set:
-        """Returns stopwords set from Sastrawi if available, or fallback."""
+        """Mengambil kumpulan stopwords dari Sastrawi atau fallback list."""
         if self._stopwords_set is None:
             if SASTRAWI_AVAILABLE:
                 try:
@@ -235,12 +276,17 @@ class TextPreprocessor:
 
     def clean_text(self, text: str) -> str:
         """
-        Cleans text: lowercase, removes URLs, mentions, punctuation, numbers, and extra spaces.
+        Langkah 1: Pembersihan Dasar
+        - Menghapus tautan web (HTTP/HTTPS URL) dan mention username (@).
+        - Case Folding: Mengubah seluruh huruf menjadi lowercase (a != A).
+        - Punctuation Removal: Mengganti tanda baca dengan spasi agar kata tidak menempel.
+        - Number Removal: Menghapus angka jika angka tidak signifikan untuk klasifikasi topik.
+        - Whitespace Stripping: Menghapus spasi ganda dan whitespace di awal/akhir kalimat.
         """
         if not isinstance(text, str):
             return ""
 
-        # Remove URLs and handles
+        # Hapus link dan mention
         text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
         text = re.sub(r"@\w+|\#", "", text)
 
@@ -248,20 +294,24 @@ class TextPreprocessor:
         if self.case_folding:
             text = text.lower()
 
-        # Remove punctuation
+        # Penghapusan tanda baca
         if self.remove_punctuation:
             text = text.translate(str.maketrans(string.punctuation, " " * len(string.punctuation)))
 
-        # Remove numbers
+        # Penghapusan angka
         if self.remove_numbers:
             text = re.sub(r"\d+", "", text)
 
-        # Remove extra whitespace
+        # Rapikan spasi berlebih
         text = re.sub(r"\s+", " ", text).strip()
         return text
 
     def normalize_slang(self, text: str) -> str:
-        """Normalizes informal/slang Indonesian words to standard formal words."""
+        """
+        Langkah 2: Normalisasi Slang & Kata Gaul
+        Memecah kalimat menjadi token kata, lalu mengganti kata yang cocok di kamus slang.
+        Contoh: 'kmpusnya dmn y' -> 'kampus dimana ya'
+        """
         if not text:
             return ""
         tokens = text.split()
@@ -269,7 +319,10 @@ class TextPreprocessor:
         return " ".join(normalized)
 
     def remove_stopwords(self, text: str) -> str:
-        """Removes Indonesian stop words."""
+        """
+        Langkah 3: Stopword Filtering
+        Menyaring kata-kata umum yang tidak membawa nilai diskriminatif untuk klasifikasi intent.
+        """
         if not text:
             return ""
         stopwords = self._get_stopwords()
@@ -278,7 +331,11 @@ class TextPreprocessor:
         return " ".join(filtered) if filtered else text
 
     def stem_text(self, text: str) -> str:
-        """Applies Sastrawi stemming to Indonesian words."""
+        """
+        Langkah 4: Morphological Stemming (Sastrawi)
+        Mengembalikan kata berimbuhan ke akar kata dasarnya.
+        Contoh: 'pendaftaran' -> 'daftar', 'membayar' -> 'bayar'
+        """
         if not text:
             return ""
         stemmer = self._get_stemmer()
@@ -301,9 +358,11 @@ class TextPreprocessor:
         stem: Optional[bool] = None
     ) -> Union[str, List[str]]:
         """
-        Transforms text with fine-grained control over each pipeline stage.
-        Supports both single string and list of strings.
+        Pipeline Eksekusi Utama:
+        Menerima input berupa 1 string kalimat atau kumpulan list kalimat (batch),
+        lalu mengeksekusi seluruh tahapan pra-pemrosesan secara berurutan.
         """
+        # Penanganan jika input berupa list kalimat (batch processing)
         if isinstance(text, (list, tuple)):
             return [
                 self.transform(
@@ -322,7 +381,11 @@ class TextPreprocessor:
         if not isinstance(text, str):
             return ""
 
-        # Parameter override or instance default
+        # Modus Eksperimen E0: Minimal Preprocessing (Hanya lowercase dasar)
+        if not full_pipeline:
+            return text.lower().strip()
+
+        # Tentukan flag aktif berdasarkan parameter override atau default instans
         do_case = case_folding if case_folding is not None else self.case_folding
         do_punct = remove_punct if remove_punct is not None else self.remove_punctuation
         do_num = remove_num if remove_num is not None else self.remove_numbers
@@ -330,13 +393,7 @@ class TextPreprocessor:
         do_stop = remove_stop if remove_stop is not None else self.stopword_removal
         do_stem = stem if stem is not None else self.stemming
 
-        # E0 Baseline mode (Minimal preprocessing)
-        if not full_pipeline:
-            # Minimal: only basic lowercase and strip
-            return text.lower().strip()
-
-        # Step 1: Base cleaning (case folding, punct, num)
-        # Custom cleaning per flags
+        # Fase 1: Pembersihan Karakter & Case Folding
         res = text
         if do_case:
             res = res.lower()
@@ -346,15 +403,15 @@ class TextPreprocessor:
             res = re.sub(r"\d+", "", res)
         res = re.sub(r"\s+", " ", res).strip()
 
-        # Step 2: Slang normalization
+        # Fase 2: Normalisasi Kata Gaul / Slang
         if do_norm:
             res = self.normalize_slang(res)
 
-        # Step 3: Stopword removal
+        # Fase 3: Penghapusan Stopwords
         if do_stop:
             res = self.remove_stopwords(res)
 
-        # Step 4: Stemming
+        # Fase 4: Stemming Kata Dasar
         if do_stem:
             res = self.stem_text(res)
 

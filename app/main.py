@@ -1,8 +1,29 @@
 """
-Web UI Chatbot - Domain-Agnostic Intent Classification
-======================================================
-Interactive Streamlit application integrating real trained ML pipelines (MultinomialNB,
-Logistic Regression, Linear SVM) with Indonesian NLP preprocessing and Out-of-Scope detection.
+================================================================================
+APLIKASI WEB: app/main.py
+DESKRIPSI: Antarmuka Web UI Chatbot Interaktif Berbasis Streamlit
+================================================================================
+
+Tujuan Ilmiah / Arsitektur Runtime:
+-----------------------------------
+Aplikasi Streamlit ini merupakan lapisan penyajian (deployment / presentation tier)
+dari sistem klasifikasi intent NLP:
+
+1. Resource Caching (@st.cache_resource):
+   - Model Machine Learning (best_model.joblib) dan pipeline preprocessor dimuat
+     ke RAM hanya SEKALI saat server pertama kali menyala.
+   - Hal ini membuat inferensi saat pengguna mengetik chat menjadi sangat cepat (< 50 ms).
+
+2. State Management (st.session_state):
+   - Streamlit bersifat stateless dan mengeksekusi ulang seluruh skrip dari atas ke bawah
+     pada setiap event interaksi.
+   - `st.session_state.messages` digunakan untuk menyimpan dan merender kembali seluruh
+     riwayat gelembung percakapan (chat bubbles) antara user dan bot.
+
+3. Alur Inferensi End-to-End:
+   - Input Pengguna -> TextPreprocessor (Slang + Cleaning) -> TF-IDF Vectorizer
+     -> Linear SVM (Platt Scaling) -> Probabilitas Keyakinan (Confidence Score)
+     -> OOS Threshold Gate -> Template Jawaban Domain -> Render Tampilan.
 """
 
 import os
@@ -10,7 +31,7 @@ import sys
 import yaml
 import streamlit as st
 
-# Add project root to sys.path
+# Menambahkan root direktori project ke sys.path
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -21,8 +42,9 @@ from src.utils import load_config, load_model
 
 
 # -----------------------------------------------------------------------------
-# Bot Knowledge Base / Response Mapping
+# 1. BASIS PENGETAHUAN & PEMETAAN RESPON INTENT (KNOWLEDGE BASE)
 # -----------------------------------------------------------------------------
+# Dictionary ini memetakan kelas intent hasil klasifikasi ke jawaban informatif bot.
 INTENT_RESPONSES = {
     "biaya_pendaftaran": (
         "💰 **Informasi Biaya Pendaftaran:**\n\n"
@@ -77,10 +99,13 @@ INTENT_RESPONSES = {
 
 
 # -----------------------------------------------------------------------------
-# Configuration & Model Loading (Cached)
+# 2. PEMUATAN MODEL & PREPROCESSOR (@st.cache_resource)
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def get_model_and_config():
+    """
+    Fungsi pemuatan model yang di-cache di memori agar inferensi berlangsung instan.
+    """
     try:
         config = load_config("config.yaml")
     except Exception:
@@ -94,6 +119,7 @@ def get_model_and_config():
             "evaluation": {"oos_threshold": 0.5}
         }
 
+    # Muat model biner terbaik dari folder models/
     model_path = os.path.join(ROOT_DIR, "models", "best_model.joblib")
     model = None
     if os.path.exists(model_path):
@@ -109,7 +135,7 @@ def get_model_and_config():
 config, trained_model, preprocessor = get_model_and_config()
 
 # -----------------------------------------------------------------------------
-# Page Configuration & Header
+# 3. KONFIGURASI HALAMAN STREAMLIT
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title=config.get("ui", {}).get("title", "Intent Classification Chatbot"),
@@ -118,13 +144,13 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# Sidebar
+# 4. SIDEBAR PANEL KONTROL
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.image("https://img.icons8.com/clouds/200/bot.png", width=100)
     st.title("⚙️ Kontrol Sistem")
 
-    # Model Status
+    # Indikator Status Model
     if trained_model is not None:
         st.success("🟢 **Model ML Terlatih Aktif**")
         classes_list = getattr(trained_model, "classes_", [])
@@ -133,7 +159,7 @@ with st.sidebar:
         st.warning("🟠 **Model Belum Dilatih**")
         st.info("Jalankan perintah berikut di terminal:\n```bash\npython scripts/run_experiments.py\n```")
 
-    # OOS Slider
+    # Slider Pengaturan Ambang Batas OOS
     default_thresh = float(config.get("evaluation", {}).get("oos_threshold", 0.5))
     oos_threshold = st.slider(
         "Ambang Batas OOS (*Confidence Threshold*):",
@@ -148,25 +174,28 @@ with st.sidebar:
     st.subheader("📊 Spesifikasi Riset")
     st.markdown("""
     - **Metrik Utama:** `Macro F1-Score`
-    - **Algoritma:** `MultinomialNB / LogReg / LinearSVM`
+    - **Algoritma:** `Linear SVM (Calibrated)`
     - **Fitur Teks:** `TF-IDF (Unigram + Bigram)`
     - **Bahasa:** `Bahasa Indonesia (Sastrawi + Slang Dict)`
     """)
 
+    # Tombol Reset Riwayat Chat
     if st.button("🗑️ Hapus Riwayat Chat"):
         st.session_state.messages = []
         st.rerun()
 
 
 # -----------------------------------------------------------------------------
-# Prediction Logic
+# 5. FUNGSI LOGIKA INFERENSI & OOS GATE
 # -----------------------------------------------------------------------------
 def infer_intent(user_text: str, threshold: float):
     """
-    Cleans user input, passes through NLP pipeline, and determines intent & confidence.
+    Eksekusi alur inferensi lengkap dari teks pengguna ke respon bot.
     """
+    # 1. Bersihkan kalimat masukan via NLP preprocessor
     clean_text = preprocessor.transform(user_text, full_pipeline=True)
     
+    # 2. Estimasi probabilitas kelas menggunakan model ML terlatih
     if trained_model is not None:
         try:
             res_list = trained_model.predict_with_confidence([clean_text], oos_threshold=threshold)
@@ -175,13 +204,12 @@ def infer_intent(user_text: str, threshold: float):
             conf = result["confidence"]
             is_oos = result["is_oos"] or intent in ["OOS_REJECTED", "OOS_DIFFERENT_DOMAIN"]
         except Exception:
-            # Fallback if probability fails
             pred = trained_model.predict([clean_text])[0]
             intent = pred
             conf = 0.85
             is_oos = False
     else:
-        # Dummy fallback when model file is not present
+        # Fallback rule-based sementara jika model belum di-train
         lower = clean_text.lower()
         if any(w in lower for w in ["biaya", "bayar", "tarif", "uang"]):
             intent, conf = "biaya_pendaftaran", 0.92
@@ -202,6 +230,7 @@ def infer_intent(user_text: str, threshold: float):
         
         is_oos = conf < threshold or intent == "OOS_REJECTED"
 
+    # 3. Ambil teks jawaban yang sesuai dari knowledge base
     reply = INTENT_RESPONSES.get(intent, INTENT_RESPONSES["OOS_REJECTED"])
 
     return {
@@ -214,15 +243,15 @@ def infer_intent(user_text: str, threshold: float):
 
 
 # -----------------------------------------------------------------------------
-# Main Chat UI
+# 6. TAMPILAN UTAMA ANTARMUKA OBROLAN (CHAT UI)
 # -----------------------------------------------------------------------------
 st.title("🤖 " + config.get("ui", {}).get("title", "Intent Classification Chatbot"))
 st.caption("Chatbot NLP berbasis Supervised Machine Learning dengan deteksi Out-of-Scope (OOS) & evaluasi Macro F1.")
 
 if trained_model is None:
-    st.warning("⚠️ **Catatan:** Model fisik (`models/best_model.joblib`) belum ditemukan. Sistem saat ini berjalan dalam mode fallback rule-based. Jalankan `python scripts/run_experiments.py` untuk mengaktifkan model ML terlatih.")
+    st.warning("⚠️ **Catatan:** Model fisik (`models/best_model.joblib`) belum ditemukan. Jalankan `python scripts/run_experiments.py` untuk melatih model ML.")
 
-# Initialize messages
+# Inisialisasi riwayat pesan di session state
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
@@ -232,7 +261,7 @@ if "messages" not in st.session_state:
         }
     ]
 
-# Render chat history
+# Render seluruh riwayat obrolan yang tersimpan
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -241,22 +270,23 @@ for msg in st.session_state.messages:
             intent_str = meta["intent"]
             conf_val = meta["confidence"]
             
+            # Tampilkan badge peringatan jika terdeteksi OOS
             if meta["is_oos"] and config.get("ui", {}).get("show_oos_warning", True):
                 st.caption(f"⚠️ `Intent: {intent_str}` | `Confidence: {conf_val:.2%}` *(Out-of-Scope Triggered)*")
             else:
                 st.caption(f"🎯 `Intent: {intent_str}` | `Confidence: {conf_val:.2%}` | `Cleaned: \"{meta.get('clean_text', '')}\"`")
 
-# Chat input
+# Menerima masukan teks baru dari pengguna
 if user_prompt := st.chat_input("Tulis pertanyaan Anda di sini... (contoh: Berapa biaya pendaftaran kuliah?)"):
-    # User message
+    # 1. Simpan dan tampilkan pesan user
     st.session_state.messages.append({"role": "user", "content": user_prompt, "meta": None})
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    # Inference
+    # 2. Proses inferensi klasifikasi intent
     pred_res = infer_intent(user_prompt, oos_threshold)
 
-    # Bot response
+    # 3. Tampilkan jawaban bot dan badge metadata
     with st.chat_message("assistant"):
         st.markdown(pred_res["reply"])
         if config.get("ui", {}).get("show_confidence_score", True):
@@ -265,7 +295,7 @@ if user_prompt := st.chat_input("Tulis pertanyaan Anda di sini... (contoh: Berap
             else:
                 st.caption(f"🎯 `Intent: {pred_res['intent']}` | `Confidence: {pred_res['confidence']:.2%}` | `Cleaned: \"{pred_res['clean_text']}\"`")
 
-    # Append bot reply
+    # 4. Simpan balasan bot ke riwayat session state
     st.session_state.messages.append({
         "role": "assistant",
         "content": pred_res["reply"],

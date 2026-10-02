@@ -1,8 +1,29 @@
 """
-Model Evaluation and Metrics Module
-==================================
-Calculates evaluation metrics (Macro F1, Accuracy, Precision, Recall),
-draws and saves Confusion Matrix figures, and evaluates Out-of-Scope thresholding.
+================================================================================
+MODUL: src/evaluation.py
+DESKRIPSI: Evaluasi Metrik Riset (Macro F1, Confusion Matrix, & OOS Analysis)
+================================================================================
+
+Tujuan Ilmiah / Konsep Teori:
+-----------------------------
+1. Mengapa Macro F1 adalah Metrik Utama (Bukan Akurasi)?
+   - Pada masalah klasifikasi teks percakapan, distribusi data sering mengalami
+     ketimpangan kelas (class imbalance).
+   - Akurasi hanya menghitung total prediksi benar dibagi total sampel, sehingga
+     model yang hanya menebak kelas mayoritas akan tetap memperoleh skor tinggi
+     walaupun gagal memprediksi kelas minoritas.
+   - Macro F1 menghitung skor F1 untuk setiap kelas secara independen, lalu mengambil
+     rata-rata aritmatikanya secara setara (equal weighting). Hal ini memaksa model
+     untuk berkinerja baik di SEMUA kelas tanpa terkecuali.
+
+2. Confusion Matrix Heatmap:
+   - Memetakan label ground truth (sumbu Y) vs label prediksi (sumbu X).
+   - Diagonal utama (kiri-atas ke kanan-bawah) menunjukkan True Positives (prediksi tepat).
+   - Sel di luar diagonal menunjukkan False Positives & False Negatives (kesalahan klasifikasi).
+
+3. Out-of-Scope (OOS) Rejection Evaluation:
+   - Mengukur seberapa andal model menolak pertanyaan di luar topik dengan memeriksa
+     apakah skor keyakinan berada di bawah ambang batas (Confidence Cutoff).
 """
 
 import os
@@ -22,14 +43,12 @@ from sklearn.metrics import (
 
 def calculate_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str, float]:
     """
-    Calculates Macro F1 (primary metric), Macro Precision, Macro Recall, Accuracy, and Weighted F1.
-
-    Args:
-        y_true: Ground truth target labels.
-        y_pred: Predicted labels.
-
-    Returns:
-        Dict containing all evaluation metric scores.
+    Menghitung metrik performa riset standar:
+    - Macro F1: Rata-rata F1 unweighted (Metrik Utama).
+    - Macro Precision: Rata-rata ketepatan prediksi per kelas.
+    - Macro Recall: Rata-rata cakupan deteksi per kelas.
+    - Accuracy: Proporsi total prediksi yang benar.
+    - Weighted F1: Rata-rata F1 yang diboboti oleh jumlah sampel per kelas.
     """
     return {
         "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
@@ -41,7 +60,9 @@ def calculate_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str, float]:
 
 
 def evaluate_intent_model(y_true: List[str], y_pred: List[str], labels: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Alias for backwards compatibility including full classification report."""
+    """
+    Menghasilkan laporan evaluasi lengkap termasuk classification report dan confusion matrix.
+    """
     metrics = calculate_metrics(y_true, y_pred)
     metrics["classification_report"] = classification_report(y_true, y_pred, labels=labels, output_dict=True, zero_division=0)
     metrics["confusion_matrix"] = confusion_matrix(y_true, y_pred, labels=labels).tolist()
@@ -56,17 +77,8 @@ def plot_and_save_confusion_matrix(
     title: str = "Confusion Matrix - Intent Classification"
 ) -> str:
     """
-    Plots and saves Confusion Matrix heatmap using Seaborn and Matplotlib.
-
-    Args:
-        y_true: Ground truth intent labels.
-        y_pred: Predicted intent labels.
-        labels: Sorted list of class labels.
-        output_path: Filepath where plot image is saved.
-        title: Title of the chart.
-
-    Returns:
-        output_path
+    Menggambar visualisasi heatmap Confusion Matrix menggunakan Seaborn dan Matplotlib,
+    lalu menyimpannya ke direktori gambar (reports/figures/) dengan resolusi 300 DPI.
     """
     if labels is None:
         labels = sorted(list(set(y_true) | set(y_pred)))
@@ -87,8 +99,8 @@ def plot_and_save_confusion_matrix(
         cbar=True
     )
     plt.title(title, fontsize=14, fontweight="bold", pad=12)
-    plt.xlabel("Predicted Label", fontsize=11, labelpad=8)
-    plt.ylabel("True Label", fontsize=11, labelpad=8)
+    plt.xlabel("Predicted Label (Hasil Prediksi Model)", fontsize=11, labelpad=8)
+    plt.ylabel("True Label (Label Sebenarnya)", fontsize=11, labelpad=8)
     plt.xticks(rotation=45, ha="right")
     plt.yticks(rotation=0)
     plt.tight_layout()
@@ -106,28 +118,21 @@ def evaluate_oos_threshold(
     oos_label: str = "OOS_REJECTED"
 ) -> Dict[str, Any]:
     """
-    Evaluates Out-of-Scope (OOS) rejection behavior.
-    If the maximum class probability is below threshold, prediction is marked as OOS_REJECTED.
-
-    Args:
-        model: Trained IntentClassifierPipeline or scikit-learn model with predict_proba.
-        X: Input text samples.
-        y_true: Ground truth labels (can include OOS or known intents).
-        threshold: Minimum probability threshold for in-scope acceptance.
-        oos_label: Label name assigned when prediction is rejected.
-
-    Returns:
-        Dict containing adjusted predictions, OOS rejection rate, and accuracy metrics.
+    Mengevaluasi kemampuan sistem dalam menolak pertanyaan Out-of-Scope (OOS).
+    
+    Jika probabilitas tertinggi model pada sebuah sampel < threshold, prediksi diubah
+    menjadi 'OOS_REJECTED'. Fungsi ini menghitung tingkat penolakan (Rejection Rate).
     """
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(X)
         preds = model.predict(X)
     else:
-        raise AttributeError("Model must support predict_proba.")
+        raise AttributeError("Model harus mendukung method predict_proba.")
 
     max_probs = np.max(probs, axis=1)
     adjusted_preds = []
 
+    # Filter ambang batas OOS
     for pred, max_prob in zip(preds, max_probs):
         if max_prob < threshold:
             adjusted_preds.append(oos_label)

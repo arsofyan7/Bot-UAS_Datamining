@@ -1,17 +1,45 @@
 """
-Automated Experimentation Runner (E0 - E6)
-=========================================
-Runs full experimental matrix for Indonesian Intent Classification research:
-- E0: Baseline (MNB + TF-IDF Unigram + Minimal Preprocessing)
-- E1: Preprocessing Ablation (MNB + TF-IDF Unigram + Full Preprocessing)
-- E2: Model Comparison (MNB vs Logistic Regression vs Linear SVM)
-- E3: N-Gram Ablation (Unigram vs Unigram+Bigram)
-- E4: Cross-Validation Stability (5-Fold Stratified CV on Best Candidate)
-- E5: Robustness Evaluation (Testing on informal/typo text variations)
-- E6: Out-of-Scope (OOS) Threshold Analysis (0.4, 0.5, 0.6, 0.7)
+================================================================================
+SKRIP: scripts/run_experiments.py
+DESKRIPSI: Runner Otomatisasi Matriks Eksperimen Riset NLP (E0 s/d E6)
+================================================================================
 
-Saves metrics to 'reports/metrics/experiment_results.json', figures to 'reports/figures/',
-and the overall best pipeline to 'models/best_model.joblib'.
+Tujuan Ilmiah / Metodologi Riset:
+---------------------------------
+Skrip ini mengeksekusi 7 skenario eksperimen berurutan untuk menjawab pertanyaan riset:
+
+1. E0 (Baseline):
+   - Arsitektur: MultinomialNB + TF-IDF Unigram + Preprocessing Minimal.
+   - Tujuan: Menentukan patokan performa awal (benchmark) terendah.
+
+2. E1 (Preprocessing Ablation):
+   - Arsitektur: MultinomialNB + TF-IDF Unigram + Full Preprocessing (Slang & Stopwords).
+   - Tujuan: Mengukur kontribusi nyata pembersihan teks Bahasa Indonesia (Delta F1).
+
+3. E2 (Model Architecture Comparison):
+   - Arsitektur: Membandingkan MultinomialNB vs Logistic Regression vs Calibrated Linear SVM.
+   - Tujuan: Memilih algoritma klasifikasi terbaik berdasarkan Macro F1 & kalibrasi probabilitas.
+
+4. E3 (N-Gram Feature Ablation):
+   - Arsitektur: Membandingkan Unigram (1,1) vs Unigram+Bigram (1,2) pada model terbaik.
+   - Tujuan: Menguji apakah informasi urutan kata (frasa 2 kata) meningkatkan ketepatan.
+
+5. E4 (Cross-Validation Stability):
+   - Metodologi: 5-Fold Stratified Cross-Validation pada model terbaik.
+   - Tujuan: Memastikan performa model stabil dan tidak mengalami overfitting data tertentu.
+
+6. E5 (Robustness Evaluation):
+   - Metodologi: Menguji ketahanan model pada variasi kalimat informal ekstrem & typo.
+   - Tujuan: Menjamin keandalan saat berhadapan dengan input pengguna di dunia nyata.
+
+7. E6 (Out-of-Scope Threshold Analysis):
+   - Metodologi: Menguji penolakan pertanyaan di luar domain pada ambang batas 0.40 s/d 0.70.
+   - Tujuan: Menentukan nilai threshold keyakinan optimal untuk penyaring OOS.
+
+Keluaran (Output Artifacts):
+- `reports/metrics/experiment_results.json`: Log metrik terstruktur.
+- `reports/figures/confusion_matrix.png`: Heatmap matriks konfusi (300 DPI).
+- `models/best_model.joblib`: Berkas model terbaik yang siap dimuat oleh Web UI.
 """
 
 import os
@@ -23,7 +51,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score
 
-# Ensure root is in sys.path
+# Memastikan root project berada di sys.path agar modul src dapat diimpor
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -35,13 +63,18 @@ from src.evaluation import calculate_metrics, plot_and_save_confusion_matrix, ev
 from src.utils import load_config, seed_everything, load_data, save_model
 
 
+# -----------------------------------------------------------------------------
+# FUNGSI FORMATTING OUTPUT TERMINAL
+# -----------------------------------------------------------------------------
 def print_section(title: str):
+    """Mencetak header seksi dengan garis pembatas."""
     print("\n" + "=" * 80)
     print(f"  {title.upper()}")
     print("=" * 80)
 
 
 def print_table(headers: list, rows: list):
+    """Mencetak tabel rapi dengan perataan kolom dinamis di terminal."""
     col_widths = [max(len(str(x)) for x in col) for col in zip(*([headers] + rows))]
     fmt = " | ".join([f"{{:<{w}}}" for w in col_widths])
     sep = "-+-".join(["-" * w for w in col_widths])
@@ -51,7 +84,11 @@ def print_table(headers: list, rows: list):
         print(fmt.format(*[str(x) for x in row]))
 
 
+# -----------------------------------------------------------------------------
+# FUNGSI UTAMA RUNNER EKSPERIMEN (E0 - E6)
+# -----------------------------------------------------------------------------
 def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path: str = "config.yaml"):
+    # 1. Inisialisasi Konfigurasi & Kunci Random Seed (Replikasi Riset)
     config = load_config(config_path)
     seed = config.get("project", {}).get("random_seed", 42)
     seed_everything(seed)
@@ -60,22 +97,21 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     print(f"[INFO] Dataset Path : {dataset_path}")
     print(f"[INFO] Random Seed  : {seed}")
 
-    # 1. Load Data
+    # 2. Pemuatan Dataset
     if not os.path.exists(dataset_path):
-        # Fallback to template if dataset not ready
         template_path = "data/templates/dataset_template.csv"
         print(f"[WARNING] Dataset {dataset_path} tidak ditemukan, beralih ke {template_path}")
         dataset_path = template_path
 
     df = load_data(dataset_path)
 
-    # Filter in-scope and OOS
+    # Pisahkan subset data berdasarkan kolom 'split'
     train_df = df[df["split"] == "train"]
     val_df = df[df["split"] == "val"]
     test_df = df[df["split"] == "test"]
     oos_df = df[df["split"] == "oos-test"]
 
-    # Combine in-scope test/val for comprehensive test set
+    # Gabungkan val dan test untuk dataset evaluasi komprehensif
     eval_df = pd.concat([val_df, test_df]) if len(test_df) > 0 else train_df
 
     X_train_raw = train_df["utterance"].tolist()
@@ -94,11 +130,10 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     experiment_results = {}
     preprocessor = TextPreprocessor()
 
-    # Preprocessed Texts
+    # Pra-pemrosesan Teks (Full Pipeline vs Minimal Pipeline)
     X_train_clean = [preprocessor.transform(t, full_pipeline=True) for t in X_train_raw]
     X_eval_clean = [preprocessor.transform(t, full_pipeline=True) for t in X_eval_raw]
 
-    # Minimal Preprocessed Texts (for E0)
     X_train_min = [preprocessor.transform(t, full_pipeline=False) for t in X_train_raw]
     X_eval_min = [preprocessor.transform(t, full_pipeline=False) for t in X_eval_raw]
 
@@ -120,7 +155,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     )
 
     # -------------------------------------------------------------------------
-    # E1: Preprocessing Ablation (MNB + TF-IDF Unigram + Full Preprocessing)
+    # E1: Preprocessing Ablation (Full Preprocessing Bahasa Indonesia)
     # -------------------------------------------------------------------------
     print_section("E1: Preprocessing Ablation (Full Preprocessing)")
     vec_e1 = FeatureExtractor(vectorizer_type="tfidf", ngram_range=(1, 1)).vectorizer
@@ -141,7 +176,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     )
 
     # -------------------------------------------------------------------------
-    # E2: Model Comparison (MNB vs Logistic Regression vs Linear SVM)
+    # E2: Model Comparison (MultinomialNB vs LogReg vs Calibrated Linear SVM)
     # -------------------------------------------------------------------------
     print_section("E2: Model Comparison (MultinomialNB vs LogReg vs Linear SVM)")
     candidate_models = ["multinomial_nb", "logistic_regression", "linear_svm"]
@@ -162,7 +197,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
 
     print_table(["Model", "Macro F1", "Accuracy", "Precision", "Recall"], e2_rows)
 
-    # Determine best model architecture from E2 (preferring linear_svm/logreg if tie due to superior probability calibration)
+    # Pemilihan model terbaik (memprioritaskan linear_svm/logreg jika F1 imbang karena kalibrasi probabilitasnya lebih tajam)
     priority_order = {"linear_svm": 3, "logistic_regression": 2, "multinomial_nb": 1}
     best_model_name = max(
         candidate_models,
@@ -171,7 +206,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     print(f"\n[INFO] Model Terbaik dari E2: {best_model_name.upper()}")
 
     # -------------------------------------------------------------------------
-    # E3: N-Gram Ablation (Unigram vs Unigram+Bigram)
+    # E3: N-Gram Ablation Analysis (Unigram vs Unigram+Bigram)
     # -------------------------------------------------------------------------
     print_section("E3: N-Gram Ablation Analysis")
     e3_configs = {
@@ -203,7 +238,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     X_all_clean = np.array(X_train_clean + X_eval_clean)
     y_all = np.array(y_train + y_eval)
 
-    # Ensure min samples for CV
+    # Validasi jumlah lipatan CV berdasarkan kelas paling sedikit
     min_class_samples = pd.Series(y_all).value_counts().min()
     n_splits = min(5, max(2, min_class_samples))
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
@@ -246,7 +281,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
         ("ad info beasiswa prestasi gak?", "beasiswa")
     ]
 
-    # Clean informal samples with our preprocessor
+    # Bersihkan sampel informal menggunakan preprocessor kami
     X_inf_clean = [preprocessor.transform(t[0], full_pipeline=True) for t in informal_test_samples]
     y_inf_true = [t[1] for t in informal_test_samples]
     inf_preds = best_pipeline.predict(X_inf_clean)
@@ -284,24 +319,24 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
     print_table(["Threshold", "OOS Rejection Rate", "Rejected Count"], e6_rows)
 
     # -------------------------------------------------------------------------
-    # Save Artifacts & Best Model
+    # MENYIMPAN ARTEFAK MODEL & LAPORAN EVALUASI
     # -------------------------------------------------------------------------
     print_section("Menyimpan Artefak Model & Laporan Eksperimen")
     
-    # Save Results JSON
+    # 1. Simpan Ringkasan Metrik ke JSON
     metrics_path = "reports/metrics/experiment_results.json"
     os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(experiment_results, f, indent=2)
     print(f"[SUCCESS] Hasil eksperimen tersimpan di: {metrics_path}")
 
-    # Save Confusion Matrix Plot
+    # 2. Simpan Gambar Heatmap Confusion Matrix (300 DPI)
     fig_path = "reports/figures/confusion_matrix.png"
     all_preds = best_pipeline.predict(X_eval_clean)
     plot_and_save_confusion_matrix(y_eval, all_preds, output_path=fig_path, title=f"Confusion Matrix ({best_model_name.upper()} - {best_ngram})")
     print(f"[SUCCESS] Confusion matrix plot tersimpan di: {fig_path}")
 
-    # Train final best pipeline on all in-scope data and save
+    # 3. Latih Ulang Model Terbaik pada Seluruh Data In-Scope dan Simpan ke .joblib
     final_best_pipeline = IntentClassifierPipeline(
         FeatureExtractor(vectorizer_type="tfidf", ngram_range=e3_configs[best_ngram]).vectorizer,
         get_model(best_model_name, random_state=seed)
@@ -314,6 +349,7 @@ def run_all_experiments(dataset_path: str = "data/raw/dataset.csv", config_path:
 
 
 def main():
+    """Entry point eksekusi skrip dari terminal CLI."""
     parser = argparse.ArgumentParser(description="Runner Eksperimen Intent Classification NLP")
     parser.add_argument("--data", default="data/raw/dataset.csv", help="Path ke dataset CSV")
     parser.add_argument("--config", default="config.yaml", help="Path ke config.yaml")

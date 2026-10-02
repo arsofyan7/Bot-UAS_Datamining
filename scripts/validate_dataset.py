@@ -1,11 +1,22 @@
 """
-Dataset Validation Script
-=========================
-Validates the CSV schema, split integrity, null values, and checks for data leakage
-between train, validation, and test splits.
+================================================================================
+SKRIP: scripts/validate_dataset.py
+DESKRIPSI: Skrip Validasi Skema Dataset & Deteksi Kebocoran Data (Data Leakage)
+================================================================================
 
-Usage:
-    python scripts/validate_dataset.py [path_to_csv]
+Tujuan Ilmiah / Konsep Teori:
+-----------------------------
+Skrip ini bertujuan memverifikasi integritas dataset sebelum proses pelatihan model.
+Pengecekan meliputi:
+1. Skema Kolom Wajib (8 Kolom): Memastikan konsistensi format CSV.
+2. Null Check & ID Unik: Memastikan tidak ada data kosong pada fitur esensial.
+3. Validasi Split: Nilai split harus salah satu dari {'train', 'val', 'test', 'oos-test'}.
+4. Deteksi Kebocoran Data (Data Leakage): Memeriksa apakah ada kalimat pada data uji
+   (val/test/oos) yang persis sama dengan data latih (train). Data leakage adalah kesalahan
+   fatal dalam machine learning yang menyebabkan model tampak memiliki performa tinggi semu.
+
+Penggunaan:
+    python scripts/validate_dataset.py [path_ke_file_dataset.csv]
 """
 
 import sys
@@ -13,6 +24,7 @@ import os
 import csv
 import argparse
 
+# 8 Kolom Standar Wajib Sesuai Desain Riset
 REQUIRED_COLUMNS = [
     'id',
     'utterance',
@@ -24,9 +36,13 @@ REQUIRED_COLUMNS = [
     'boundary_case_notes'
 ]
 
+# Himpunan Nilai Split yang Valid
 VALID_SPLITS = {'train', 'val', 'test', 'oos-test'}
 
 
+# -----------------------------------------------------------------------------
+# FUNGSI LOGGING TERMINAL DENGAN KODE WARNA ANSI
+# -----------------------------------------------------------------------------
 def log_info(msg: str):
     print(f"[INFO] {msg}")
 
@@ -43,7 +59,14 @@ def log_error(msg: str):
     print(f"\033[91m[ERROR] {msg}\033[0m")
 
 
+# -----------------------------------------------------------------------------
+# FUNGSI UTAMA VALIDASI DATASET
+# -----------------------------------------------------------------------------
 def validate_dataset(filepath: str) -> bool:
+    """
+    Mengeksekusi 4 tahapan validasi dataset secara berurutan.
+    Mengembalikan True jika seluruh pengujian lulus, atau False jika ada error.
+    """
     log_info(f"Memulai validasi dataset: {filepath}")
 
     if not os.path.exists(filepath):
@@ -52,11 +75,12 @@ def validate_dataset(filepath: str) -> bool:
 
     rows = []
     try:
+        # Membaca file CSV menggunakan modul standar Python csv.DictReader
         with open(filepath, mode="r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames
             if headers is None:
-                log_error("File CSV kosong atau tidak memiliki header.")
+                log_error("File CSV kosong atau tidak memiliki baris header.")
                 return False
             for row in reader:
                 rows.append(row)
@@ -72,7 +96,9 @@ def validate_dataset(filepath: str) -> bool:
         log_error("Dataset tidak memiliki baris data (0 baris).")
         return False
 
-    # 1. Validasi Kolom Wajib
+    # -------------------------------------------------------------------------
+    # TAHAP 1: VALIDASI SKEMA KOLOM WAJIB
+    # -------------------------------------------------------------------------
     missing_cols = [col for col in REQUIRED_COLUMNS if col not in headers]
     extra_cols = [col for col in headers if col not in REQUIRED_COLUMNS]
 
@@ -88,7 +114,9 @@ def validate_dataset(filepath: str) -> bool:
     if not is_valid:
         return False
 
-    # 2. Validasi Nilai Kosong & Unik ID
+    # -------------------------------------------------------------------------
+    # TAHAP 2: VALIDASI NILAI NULL, UNIK ID, & DISTRIBUSI SPLIT
+    # -------------------------------------------------------------------------
     essential_cols = ['id', 'utterance', 'intent', 'split']
     seen_ids = set()
     duplicate_ids = []
@@ -100,19 +128,20 @@ def validate_dataset(filepath: str) -> bool:
     val_test_rows = []
 
     for idx, row in enumerate(rows, start=1):
-        # Null check
+        # Pengecekan nilai kosong pada kolom esensial
         for col in essential_cols:
             val = (row.get(col) or "").strip()
             if not val:
                 log_error(f"Baris #{idx}: Kolom esensial '{col}' bernilai kosong.")
                 is_valid = False
 
+        # Pengecekan keunikan ID
         row_id = (row.get('id') or "").strip()
         if row_id in seen_ids:
             duplicate_ids.append(row_id)
         seen_ids.add(row_id)
 
-        # Split check
+        # Validasi kategori split
         split_val = (row.get('split') or "").strip()
         if split_val not in VALID_SPLITS:
             log_error(f"Baris #{idx} (ID: {row_id}): Nilai split '{split_val}' tidak valid. Harus salah satu dari {list(VALID_SPLITS)}")
@@ -127,7 +156,7 @@ def validate_dataset(filepath: str) -> bool:
         if domain_val:
             unique_domains.add(domain_val)
 
-        # Track for leakage check
+        # Simpan teks untuk pengecekan kebocoran data
         utt = (row.get('utterance') or "").strip().lower()
         if split_val == 'train':
             train_utterances.add(utt)
@@ -143,7 +172,9 @@ def validate_dataset(filepath: str) -> bool:
     if is_valid and split_counts:
         log_success(f"Distribusi split valid: {split_counts}")
 
-    # 3. Pengecekan Kebocoran Data (Data Leakage)
+    # -------------------------------------------------------------------------
+    # TAHAP 3: PENGECEKAN KEBOCORAN DATA (DATA LEAKAGE CHECK)
+    # -------------------------------------------------------------------------
     leaked_rows = [item for item in val_test_rows if item[2] in train_utterances]
     if leaked_rows:
         log_warning(f"Terdeteksi potensi Data Leakage! {len(leaked_rows)} utterance di val/test persis sama dengan train:")
@@ -156,6 +187,9 @@ def validate_dataset(filepath: str) -> bool:
 
     log_info(f"Ringkasan: {len(unique_intents)} Unique Intents, {len(unique_domains)} Unique Domains.")
 
+    # -------------------------------------------------------------------------
+    # STATUS AKHIR
+    # -------------------------------------------------------------------------
     if is_valid:
         log_success("SELURUH VALIDASI BERHASIL! Dataset siap digunakan untuk eksperimen.")
     else:
@@ -165,6 +199,7 @@ def validate_dataset(filepath: str) -> bool:
 
 
 def main():
+    """Entry point eksekusi skrip dari command-line interface."""
     parser = argparse.ArgumentParser(description="Validasi Dataset Intent Classification NLP")
     parser.add_argument(
         "filepath",
