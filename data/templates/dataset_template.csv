@@ -1,0 +1,4 @@
+id,utterance,normalized_utterance,intent,domain,source,split,boundary_case_notes
+UTT-001,Berapa biaya pendaftaran?,berapa biaya pendaftaran,biaya_pendaftaran,PENDIDIKAN,synthetic,train,
+UTT-002,Lokasi kampusnya dmn ya?,lokasi kampus dimana ya,lokasi_alamat,PENDIDIKAN,synthetic,train,
+UTT-003,Siapa presiden Indonesia saat ini?,siapa presiden indonesia saat ini,OOS_DIFFERENT_DOMAIN,OUT_OF_SCOPE,synthetic,oos-test,Out of domain test

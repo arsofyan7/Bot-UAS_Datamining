@@ -1,0 +1,43 @@
+project:
+  name: "Domain-Agnostic Intent Classification Chatbot"
+  version: "1.0.0"
+  random_seed: 42
+
+paths:
+  raw_data: "data/raw/"
+  processed_data: "data/processed/"
+  template_data: "data/templates/dataset_template.csv"
+  model_output: "models/"
+  reports_figures: "reports/figures/"
+  reports_metrics: "reports/metrics/"
+
+preprocessing:
+  case_folding: true
+  remove_punctuation: true
+  remove_numbers: true
+  normalization: true
+  stopword_removal: true
+  stemming: true
+
+features:
+  vectorizer: "tfidf"
+  ngram_range: [1, 2] # Unigram dan Bigram
+  max_features: 5000
+
+models:
+  baseline: "linear_svm"
+  candidates:
+    - linear_svm
+    - logistic_regression
+    - multinomial_nb
+
+evaluation:
+  primary_metric: "macro_f1"
+  cv_folds: 5
+  oos_threshold: 0.5
+
+ui:
+  title: "Intent Classification Chatbot NLP"
+  theme_color: "#1E88E5"
+  show_confidence_score: true
+  show_oos_warning: true
