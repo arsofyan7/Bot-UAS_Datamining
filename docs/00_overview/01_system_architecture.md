@@ -101,3 +101,75 @@ Pengembangan proyek ini mengikuti 6 tahapan standar industri **CRISP-DM (*Cross-
        │    - Show Confidence Tag  │ -> 🎯 Intent: biaya_pendaftaran | Conf: 77.17%
        └───────────────────────────┘
 ```
+
+---
+
+## 4. Diagram Alir Teknis & Penelusuran Kode (Code Traceability Flowchart)
+
+Bagian ini membedah secara mendalam proses komputasi yang terjadi di balik layar, mulai dari saat pengguna menekan tombol *Enter* pada kotak input chat hingga teks balasan muncul di layar.
+
+### A. Diagram Alir Komputasi (Mermaid Flowchart)
+
+```mermaid
+flowchart TD
+    Start([Pengguna Menginput Kalimat]) --> InputUI["app/main.py: st.chat_input()"]
+    
+    subgraph S1_PREPROCESSING ["FASE 1: NLP PREPROCESSING (src/preprocessing.py)"]
+        InputUI --> Step1["TextPreprocessor.clean_text()\n- Case folding (lowercase)\n- Hapus URL, tanda baca, simbol, angka\n- Normalisasi spasi berlebih"]
+        Step1 --> Step2["TextPreprocessor.normalize_slang()\n- Lookup kamus DEFAULT_SLANG_DICT\n- 'brp' -> 'berapa', 'bya' -> 'biaya', 'dftr' -> 'daftar'"]
+        Step2 --> Step3["TextPreprocessor.remove_stopwords()\n- Filter kata hubung umum yang tidak bermakna intent\n- Pertahankan kata kunci pertanyaan"]
+        Step3 --> CleanText[/"Output Bersih: 'berapa biaya daftar mahasiswa baru'"/]
+    end
+
+    subgraph S2_FEATURE_EXTRACTION ["FASE 2: EKSTRAKSI FITUR (src/feature_extraction.py)"]
+        CleanText --> TFIDF["FeatureExtractor.transform()\n- Hitung Term Frequency (TF)\n- Kalikan bobot Inverse Document Frequency (IDF)\n- Ekstraksi Unigram + Bigram (1,2)\n- Terapkan Sublinear Scaling: 1 + log(TF)"]
+        TFIDF --> SparseVector[/"Matriks Fitur Numerik: Sparse Matrix [1 x 5000]"/]
+    end
+
+    subgraph S3_INFERENCE ["FASE 3: INFERENSI & KALIBRASI (src/models.py)"]
+        SparseVector --> SVM["LinearSVC.decision_function()\n- Hitung jarak sampel ke Hyperplane: f(x) = w^T x + b"]
+        SVM --> PlattScaling["CalibratedClassifierCV (Platt Scaling)\n- Transformasi Sigmoid Logistik:\n  P(c|x) = 1 / (1 + exp(A * f(x) + B))"]
+        PlattScaling --> ProbDist[/"Distribusi Probabilitas Kelas P = [p1, p2, ..., pK]"/]
+        ProbDist --> ArgMax["Evaluasi Puncak Keyakinan:\n- Max Confidence: max_prob = max(P)\n- Predicted Intent: c* = argmax(P)"]
+    end
+
+    subgraph S4_OOS_GATE ["FASE 4: OOS FILTER & KNOWLEDGE MATCHING (app/main.py)"]
+        ArgMax --> OOSCheck{"Apakah max_prob >= OOS_Threshold?\n(Default: 0.50 / 50%)"}
+        
+        OOSCheck -- "TIDAK (Confidence Rendah / Pertanyaan Acak)" --> OOSBranch["Set Intent = 'OOS_REJECTED'\nSet is_oos = True\nAmbil Template Penolakan Sopan"]
+        OOSCheck -- "YA (Confidence Tinggi / In-Scope)" --> InScopeBranch["Set Intent = c*\nSet is_oos = False\nAmbil Jawaban Informatif dari INTENT_RESPONSES[c*]"]
+    end
+
+    subgraph S5_PRESENTATION ["FASE 5: PENYAJIAN & STATE MANAGEMENT (app/main.py)"]
+        OOSBranch --> RenderUI["Render Pesan Bot di UI:\n- st.chat_message('assistant')\n- Render Teks Balasan\n- Render Badge Intent & Skor Confidence %"]
+        InScopeBranch --> RenderUI
+        RenderUI --> AppendHistory["Update Session State:\nst.session_state.messages.append()\n(Menyimpan riwayat obrolan di memori)"]
+        AppendHistory --> End([Selesai / Menunggu Input Berikutnya])
+    end
+
+    classDef phase fill:#f8f9fa,stroke:#1e88e5,stroke-width:2px;
+    classDef io fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    class S1_PREPROCESSING,S2_FEATURE_EXTRACTION,S3_INFERENCE,S4_OOS_GATE,S5_PRESENTATION phase;
+    class CleanText,SparseVector,ProbDist io;
+    class OOSCheck decision;
+```
+
+---
+
+### B. Matriks Penelusuran Kode (*Code Execution Traceability Matrix*)
+
+Tabel berikut memetakan setiap proses komputasi data mining ke berkas, baris fungsi, dan bentuk data yang ditransformasikan:
+
+| No | Fase Komputasi | Berkas & Fungsi Terkait | Operasi Data Mining / NLP | Contoh Input Data | Contoh Output Data |
+| :---: | :--- | :--- | :--- | :--- | :--- |
+| **1** | **User Input Capture** | [app/main.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/app/main.py) $\rightarrow$ `st.chat_input()` | Menerima masukan teks mentah dari form web. | `"brp bya dftr mhs baru min?"` | String mentah |
+| **2** | **Case Folding & Cleaning** | [src/preprocessing.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/preprocessing.py) $\rightarrow$ `clean_text()` | Lowercase, pembersihan tanda baca via `string.punctuation`, dan penghapusan spasi ganda. | `"brp bya dftr mhs baru min?"` | `"brp bya dftr mhs baru min"` |
+| **3** | **Slang Normalization** | [src/preprocessing.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/preprocessing.py) $\rightarrow$ `normalize_slang()` | Pemetaan kata tidak baku berdasarkan kamus `DEFAULT_SLANG_DICT`. | `"brp bya dftr mhs baru min"` | `"berapa biaya daftar mahasiswa baru admin"` |
+| **4** | **Stopword Filtering** | [src/preprocessing.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/preprocessing.py) $\rightarrow$ `remove_stopwords()` | Eliminasi partikel non-krusial menggunakan daftar stopword Bahasa Indonesia. | `"berapa biaya daftar mahasiswa baru admin"` | `"berapa biaya daftar mahasiswa baru"` |
+| **5** | **TF-IDF Vectorization** | [src/feature_extraction.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/feature_extraction.py) $\rightarrow$ `transform()` | Pembobotan statistik $\text{TF} \times \text{IDF}$ dengan N-Gram (1,2) dan sublinear scaling $1 + \log(\text{tf})$. | String bersih | Sparse Matrix $[1 \times 5000]$ |
+| **6** | **Hyperplane Evaluation** | [src/models.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/models.py) $\rightarrow$ `LinearSVC.decision_function()` | Menghitung jarak geometri sampel terhadap bidang pemisah: $f(\mathbf{x}) = \mathbf{w}^T \mathbf{x} + b$. | Sparse Matrix $[1 \times 5000]$ | Vektor margin $[-1.2, 3.8, -0.5, ...]$ |
+| **7** | **Probability Calibration** | [src/models.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/models.py) $\rightarrow$ `predict_proba()` | Transformasi Platt Scaling sigmoid logistik ke probabilitas keyakinan $[0.0, 1.0]$. | Vektor margin | Array probabilitas: `{'biaya_pendaftaran': 0.7717, 'lokasi_alamat': 0.0088, ...}` |
+| **8** | **OOS Decision Gate** | [src/models.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/models.py) $\rightarrow$ `predict_with_confidence()` | Evaluasi ambang batas: $\max(P) \ge \theta_{\text{OOS}}$ (apakah $77.17\% \ge 50\%$). | $\max(P) = 77.17\%$ | Status: `is_oos = False`, Intent: `biaya_pendaftaran` |
+| **9** | **Knowledge Retrieval** | [app/main.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/app/main.py) $\rightarrow$ `infer_intent()` | Mengambil teks jawaban informatif dari dictionary `INTENT_RESPONSES`. | Key: `biaya_pendaftaran` | Teks format Markdown: `"💰 Informasi Biaya Pendaftaran: ..."` |
+| **10**| **UI Rendering & State** | [app/main.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/app/main.py) $\rightarrow$ `st.chat_message()` | Menampilkan balon percakapan, badge metadata, dan menyimpan pesan ke `st.session_state`. | Objek Respon & Metadata | Tampilan Web Browser Rendered |
