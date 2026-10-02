@@ -6,34 +6,33 @@ Selamat datang di repositori dokumentasi resmi untuk proyek penelitian **"Domain
 
 ## 🧭 Navigasi Dokumen
 
-```text
-docs/
-├── 00_overview/
-│   ├── 01_system_architecture.md       # Arsitektur makro, metodologi CRISP-DM, & alur end-to-end
-│   ├── 02_project_structure.md          # Penjelasan fungsi setiap folder dan berkas kode
-│   └── 03_domain_adaptation_guide.md    # Panduan lengkap ganti domain tugas UAS (step-by-step)
-│
-├── 01_data_phase/
-│   ├── 01_data_schema.md                # Spesifikasi 8 kolom dataset & pembagian split data
-│   └── 02_data_validation.md            # Mekanisme validasi skema & pencegahan Data Leakage
-│
-├── 02_nlp_pipeline_phase/
-│   ├── 01_preprocessing.md              # Pipeline pra-pemrosesan teks Bahasa Indonesia
-│   └── 02_feature_extraction.md         # Ekstraksi fitur TF-IDF & analisis N-Gram
-│
-├── 03_modeling_and_experiments_phase/
-│   ├── 01_model_architectures.md        # Teori algoritma MNB, Logistic Regression, & Linear SVM
-│   ├── 02_experiment_matrix_e0_e6.md    # Desain & analisis matriks eksperimen riset E0–E6
-│   └── 03_oos_threshold_theory.md       # Teori & implementasi filter Out-of-Scope (OOS)
-│
-├── 04_evaluation_phase/
-│   ├── 01_metrics_guide.md              # Rasionalisasi metrik utama Macro F1 vs Akurasi
-│   └── 02_error_analysis.md             # Analisis kesalahan (Confusion Matrix & JSON Logs)
-│
-└── 05_deployment_and_ui_phase/
-    ├── 01_streamlit_flow.md             # Arsitektur runtime Web UI Chatbot (Streamlit)
-    └── 02_how_to_run_and_troubleshoot.md # Panduan instalasi, eksekusi perintah, & solusi error
-```
+Klik pada tautan berkas `.md` di bawah untuk membaca dokumentasi modul terkait:
+
+### 🏛️ 00. Overview & Arsitektur Makro
+- 📄 [01_system_architecture.md](00_overview/01_system_architecture.md) — Arsitektur sistem makro, metodologi standar CRISP-DM, dan diagram alur data end-to-end.
+- 📄 [02_project_structure.md](00_overview/02_project_structure.md) — Penjelasan fungsi dan tanggung jawab setiap folder serta berkas kode dalam repositori.
+- 📄 [03_domain_adaptation_guide.md](00_overview/03_domain_adaptation_guide.md) — ⭐ **Panduan Lengkap 7 Langkah Adaptasi & Ganti Domain Baru** (tugas studi kasus UAS).
+
+### 📊 01. Fase Dataset & Validasi
+- 📄 [01_data_schema.md](01_data_phase/01_data_schema.md) — Spesifikasi 8 kolom standar dataset dan aturan pembagian data (*Train/Val/Test/OOS*).
+- 📄 [02_data_validation.md](01_data_phase/02_data_validation.md) — Mekanisme kerja skrip validasi skema, null checks, dan pencegahan kebocoran data (*Data Leakage*).
+
+### 🔤 02. Fase NLP Pipeline
+- 📄 [01_preprocessing.md](02_nlp_pipeline_phase/01_preprocessing.md) — Tahapan pra-pemrosesan teks Bahasa Indonesia (Case Folding, Slang Normalization, Stopwords, Stemming).
+- 📄 [02_feature_extraction.md](02_nlp_pipeline_phase/02_feature_extraction.md) — Konsep matematika ekstraksi fitur TF-IDF, N-Gram (Unigram vs Bigram), dan scaling sublinear TF.
+
+### 🧠 03. Fase Modeling & Eksperimen
+- 📄 [01_model_architectures.md](03_modeling_and_experiments_phase/01_model_architectures.md) — Teori dan implementasi MultinomialNB, Logistic Regression, dan Calibrated Linear SVM.
+- 📄 [02_experiment_matrix_e0_e6.md](03_modeling_and_experiments_phase/02_experiment_matrix_e0_e6.md) — Desain riset dan metodologi matriks eksperimen E0 (Baseline) hingga E6 (OOS Analysis).
+- 📄 [03_oos_threshold_theory.md](03_modeling_and_experiments_phase/03_oos_threshold_theory.md) — Teori dan mekanisme filter Out-of-Scope (OOS) berbasis *Confidence Thresholding*.
+
+### 📈 04. Fase Evaluasi & Analisis
+- 📄 [01_metrics_guide.md](04_evaluation_phase/01_metrics_guide.md) — Rasionalisasi pemilihan metrik utama Macro F1 vs Akurasi pada masalah *Class Imbalance*.
+- 📄 [02_error_analysis.md](04_evaluation_phase/02_error_analysis.md) — Cara membaca visualisasi Confusion Matrix heatmap dan menginterpretasikan log metrik JSON.
+
+### 🖥️ 05. Fase Deployment & Web UI
+- 📄 [01_streamlit_flow.md](05_deployment_and_ui_phase/01_streamlit_flow.md) — Arsitektur runtime Web UI Streamlit, penanganan session state, dan optimasi resource cache.
+- 📄 [02_how_to_run_and_troubleshoot.md](05_deployment_and_ui_phase/02_how_to_run_and_troubleshoot.md) — Daftar perintah eksekusi CLI lengkap dan panduan solusi kendala teknis (*troubleshooting*).
 
 ---
 
