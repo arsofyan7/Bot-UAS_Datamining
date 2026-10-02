@@ -139,11 +139,24 @@ DEFAULT_INDONESIAN_STOPWORDS = {
 
 
 # -----------------------------------------------------------------------------
-# 3. KAMUS NORMALISASI SLANG / KATA GAUL / SINGKATAN PERCAKAPAN
+# 3. KATA KUNCI INTENT YANG DILINDUNGI (PROTECTED INTENT KEYWORDS)
 # -----------------------------------------------------------------------------
-# Mengapa normalisasi dilakukan sebelum stopword removal?
-# Agar singkatan seperti "dmn" -> "dimana" atau "kpn" -> "kapan" berhasil dipulihkan
-# ke bentuk kata aslinya terlebih dahulu sehingga vectorizer dapat mengenali fitur tersebut.
+# Kata tanya (WH-words) dan kata kunci domain yang WAJIB DILINDUNGI dari
+# penghapusan stopword karena merupakan penentu utama arah intent.
+PROTECTED_INTENT_WORDS = {
+    "dimana", "mana", "kapan", "berapa", "siapa", "bagaimana", "mengapa", "kenapa", "apa",
+    "lokasi", "alamat", "biaya", "tarif", "harga", "jadwal", "waktu", "syarat", "dokumen",
+    "berkas", "beasiswa", "prodi", "jurusan", "program", "studi", "kontak", "telepon",
+    "whatsapp", "email", "gedung", "daftar", "pendaftaran", "registrasi", "masuk", "kuliah", "kampus"
+}
+
+# Kata sapaan & partikel basa-basi yang disaring agar tidak mengacaukan klasifikasi intent
+CONVERSATIONAL_FILLERS = {
+    "halo", "hai", "admin", "kakak", "kak", "gan", "juragan", "bro", "saudara", "sis",
+    "saudari", "tolong", "mohon", "silakan", "terima", "kasih", "makasih", "trims", "pls", "tlg", "mhn"
+}
+
+# Kamus Slang & Normalisasi
 DEFAULT_SLANG_DICT = {
     # Kata Tanya & Partikel Arah
     "dmn": "dimana",
@@ -200,6 +213,7 @@ DEFAULT_SLANG_DICT = {
     "ad": "ada",
     "hrus": "harus",
     "info": "informasi",
+    "infonya": "informasi",
     "pls": "tolong",
     "tlg": "tolong",
     "mhn": "mohon",
@@ -221,9 +235,6 @@ DEFAULT_SLANG_DICT = {
 class TextPreprocessor:
     """
     Kelas pemrosesan teks modular untuk Bahasa Indonesia.
-    
-    Menyediakan kontrol fleksibel untuk menghidupkan/mematikan komponen pra-pemrosesan
-    guna mendukung studi perbandingan ablasi (Eksperimen E0 vs E1).
     """
 
     def __init__(
@@ -236,9 +247,6 @@ class TextPreprocessor:
         stemming: bool = False,
         custom_slang_dict: Optional[Dict[str, str]] = None
     ):
-        """
-        Inisialisasi konfigurasi pipeline pembersihan.
-        """
         self.case_folding = case_folding
         self.remove_punctuation = remove_punctuation
         self.remove_numbers = remove_numbers
@@ -246,72 +254,65 @@ class TextPreprocessor:
         self.stopword_removal = stopword_removal
         self.stemming = stemming
 
-        # Gunakan kamus kustom jika diberikan, atau gunakan kamus bawaan
         self.slang_dict = custom_slang_dict or DEFAULT_SLANG_DICT
-
-        # Lazy loading objek Sastrawi agar inisialisasi awal tetap instan
         self._stemmer = None
         self._stopword_remover = None
         self._stopwords_set = None
 
     def _get_stemmer(self):
-        """Lazy loader untuk objek Sastrawi Stemmer."""
         if self._stemmer is None and SASTRAWI_AVAILABLE:
             factory = StemmerFactory()
             self._stemmer = factory.create_stemmer()
         return self._stemmer
 
     def _get_stopwords(self) -> set:
-        """Mengambil kumpulan stopwords dari Sastrawi atau fallback list."""
         if self._stopwords_set is None:
             if SASTRAWI_AVAILABLE:
                 try:
                     factory = StopWordRemoverFactory()
-                    self._stopwords_set = set(factory.get_stop_words())
+                    raw_set = set(factory.get_stop_words())
                 except Exception:
-                    self._stopwords_set = DEFAULT_INDONESIAN_STOPWORDS
+                    raw_set = set(DEFAULT_INDONESIAN_STOPWORDS)
             else:
-                self._stopwords_set = DEFAULT_INDONESIAN_STOPWORDS
+                raw_set = set(DEFAULT_INDONESIAN_STOPWORDS)
+
+            # Tambahkan kata sapaan/filler ke daftar stopword
+            raw_set = raw_set.union(CONVERSATIONAL_FILLERS)
+            # Lindungi kata kunci penting (WH-words & anchor intent) agar tidak terhapus
+            self._stopwords_set = raw_set - PROTECTED_INTENT_WORDS
         return self._stopwords_set
 
     def clean_text(self, text: str) -> str:
         """
-        Langkah 1: Pembersihan Dasar
-        - Menghapus tautan web (HTTP/HTTPS URL) dan mention username (@).
-        - Case Folding: Mengubah seluruh huruf menjadi lowercase (a != A).
-        - Punctuation Removal: Mengganti tanda baca dengan spasi agar kata tidak menempel.
-        - Number Removal: Menghapus angka jika angka tidak signifikan untuk klasifikasi topik.
-        - Whitespace Stripping: Menghapus spasi ganda dan whitespace di awal/akhir kalimat.
+        Pembersihan URL, mention, case-folding, tanda baca, angka, dan whitespace.
+        PENTING: URL harus dihapus SEBELUM tanda baca diubah menjadi spasi!
         """
         if not isinstance(text, str):
             return ""
 
-        # Hapus link dan mention
-        text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
-        text = re.sub(r"@\w+|\#", "", text)
+        # 1. Hapus markdown link [text](url) dan URL HTTP/HTTPS/WWW
+        text = re.sub(r"\[.*?\]\(.*?\)", "", text)
+        text = re.sub(r"https?://\S+|www\.\S+|http\S+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"@\w+|\#\w+", "", text)
 
-        # Case folding
+        # 2. Case folding
         if self.case_folding:
             text = text.lower()
 
-        # Penghapusan tanda baca
+        # 3. Penghapusan tanda baca
         if self.remove_punctuation:
             text = text.translate(str.maketrans(string.punctuation, " " * len(string.punctuation)))
 
-        # Penghapusan angka
+        # 4. Penghapusan angka
         if self.remove_numbers:
             text = re.sub(r"\d+", "", text)
 
-        # Rapikan spasi berlebih
+        # 5. Rapikan spasi berlebih
         text = re.sub(r"\s+", " ", text).strip()
         return text
 
     def normalize_slang(self, text: str) -> str:
-        """
-        Langkah 2: Normalisasi Slang & Kata Gaul
-        Memecah kalimat menjadi token kata, lalu mengganti kata yang cocok di kamus slang.
-        Contoh: 'kmpusnya dmn y' -> 'kampus dimana ya'
-        """
+        """Normalisasi kata gaul/singkatan ke bentuk baku."""
         if not text:
             return ""
         tokens = text.split()
@@ -319,10 +320,7 @@ class TextPreprocessor:
         return " ".join(normalized)
 
     def remove_stopwords(self, text: str) -> str:
-        """
-        Langkah 3: Stopword Filtering
-        Menyaring kata-kata umum yang tidak membawa nilai diskriminatif untuk klasifikasi intent.
-        """
+        """Menyaring stopword non-krusial dengan tetap menjaga kata tanya/intent."""
         if not text:
             return ""
         stopwords = self._get_stopwords()
@@ -331,11 +329,7 @@ class TextPreprocessor:
         return " ".join(filtered) if filtered else text
 
     def stem_text(self, text: str) -> str:
-        """
-        Langkah 4: Morphological Stemming (Sastrawi)
-        Mengembalikan kata berimbuhan ke akar kata dasarnya.
-        Contoh: 'pendaftaran' -> 'daftar', 'membayar' -> 'bayar'
-        """
+        """Stemming kata dasar Sastrawi."""
         if not text:
             return ""
         stemmer = self._get_stemmer()
@@ -357,12 +351,6 @@ class TextPreprocessor:
         remove_stop: Optional[bool] = None,
         stem: Optional[bool] = None
     ) -> Union[str, List[str]]:
-        """
-        Pipeline Eksekusi Utama:
-        Menerima input berupa 1 string kalimat atau kumpulan list kalimat (batch),
-        lalu mengeksekusi seluruh tahapan pra-pemrosesan secara berurutan.
-        """
-        # Penanganan jika input berupa list kalimat (batch processing)
         if isinstance(text, (list, tuple)):
             return [
                 self.transform(
@@ -381,11 +369,9 @@ class TextPreprocessor:
         if not isinstance(text, str):
             return ""
 
-        # Modus Eksperimen E0: Minimal Preprocessing (Hanya lowercase dasar)
         if not full_pipeline:
             return text.lower().strip()
 
-        # Tentukan flag aktif berdasarkan parameter override atau default instans
         do_case = case_folding if case_folding is not None else self.case_folding
         do_punct = remove_punct if remove_punct is not None else self.remove_punctuation
         do_num = remove_num if remove_num is not None else self.remove_numbers
@@ -393,8 +379,12 @@ class TextPreprocessor:
         do_stop = remove_stop if remove_stop is not None else self.stopword_removal
         do_stem = stem if stem is not None else self.stemming
 
-        # Fase 1: Pembersihan Karakter & Case Folding
-        res = text
+        # Fase 1: Hapus URL & Mention terlebih dahulu sebelum tanda baca
+        res = re.sub(r"\[.*?\]\(.*?\)", "", text)
+        res = re.sub(r"https?://\S+|www\.\S+|http\S+", "", res, flags=re.MULTILINE)
+        res = re.sub(r"@\w+|\#\w+", "", res)
+
+        # Fase 2: Case folding, tanda baca, angka
         if do_case:
             res = res.lower()
         if do_punct:
@@ -403,15 +393,15 @@ class TextPreprocessor:
             res = re.sub(r"\d+", "", res)
         res = re.sub(r"\s+", " ", res).strip()
 
-        # Fase 2: Normalisasi Kata Gaul / Slang
+        # Fase 3: Normalisasi Slang
         if do_norm:
             res = self.normalize_slang(res)
 
-        # Fase 3: Penghapusan Stopwords
+        # Fase 4: Stopwords Filtering (Melindungi kata tanya & intent keywords)
         if do_stop:
             res = self.remove_stopwords(res)
 
-        # Fase 4: Stemming Kata Dasar
+        # Fase 5: Stemming
         if do_stem:
             res = self.stem_text(res)
 
