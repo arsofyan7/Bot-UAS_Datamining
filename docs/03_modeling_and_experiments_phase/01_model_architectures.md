@@ -28,5 +28,19 @@ Dokumen ini menjelaskan teori dan implementasi tiga algoritma *Supervised Learni
   $$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i$$
 - **Kalibrasi Platt (`CalibratedClassifierCV`):**
   Linear SVM murni hanya menghasilkan nilai jarak margin (*decision function*), bukan nilai probabilitas 0 s/d 1. Oleh karena itu, model dibungkus dengan metode *Platt Scaling* via 3-Fold Cross-Validation menggunakan fungsi sigmoid logistik:
-  $$P(y=1 \mid f(\mathbf{x})) = \frac{1}{1 + e^{A \cdot f(\mathbf{x}) + B}}$$
 - **Kelebihan Utama:** Memberikan estimasi *confidence score* yang sangat tegas (di atas 75–90% untuk kalimat in-scope yang cocok) dan rendah (di bawah 20–30% untuk pertanyaan acak), menjadikannya **model terbaik** untuk filtering Out-of-Scope (OOS).
+
+---
+
+## 4. Mekanisme Seleksi Model (Turnamen Model vs Ensemble Voting)
+
+### Bagaimana Sistem Memilih Algoritma Terbaik?
+Sistem tidak menjalankan 3 algoritma saat user sedang chat. Sebaliknya, proses pemilihan model dilakukan pada tahap eksperimen (**E2 Model Comparison** di `scripts/run_experiments.py`):
+
+1. **Evaluasi Terstandarisasi:** Ketiga model (MultinomialNB, Logistic Regression, Linear SVM) dilatih pada data latih yang sama dan diuji pada data uji yang sama.
+2. **Kriteria Penilaian:**
+   - Skor **Macro F1** pada data evaluasi independen.
+   - Ketajaman kalibrasi probabilitas keyakinan (*confidence score sharpness*) untuk membedakan pertanyaan in-scope vs out-of-scope.
+3. **Persistensi Model Juara (*Champion Model*):** Model yang memenangkan turnamen (Linear SVM) disimpan ke berkas biner tunggal `models/best_model.joblib`.
+4. **Eksekusi di Production (Streamlit):** Web UI hanya memuat 1 model juara tersebut ke dalam RAM, sehingga respon balasan chat berlangsung instan (**< 50 milidetik**) dan hemat memori server.
+

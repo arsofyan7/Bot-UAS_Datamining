@@ -166,3 +166,54 @@ Tabel berikut memetakan setiap proses komputasi data mining ke berkas, baris fun
 | **8** | **OOS Decision Gate** | [src/models.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/src/models.py) $\rightarrow$ `predict_with_confidence()` | Evaluasi ambang batas: $\max(P) \ge \theta_{\text{OOS}}$ (apakah $77.17\% \ge 50\%$). | $\max(P) = 77.17\%$ | Status: `is_oos = False`, Intent: `biaya_pendaftaran` |
 | **9** | **Knowledge Retrieval** | [app/main.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/app/main.py) $\rightarrow$ `infer_intent()` | Mengambil teks jawaban informatif dari dictionary `INTENT_RESPONSES`. | Key: `biaya_pendaftaran` | Teks format Markdown: `"💰 Informasi Biaya Pendaftaran: ..."` |
 | **10**| **UI Rendering & State** | [app/main.py](file:///d:/Kuliah/1_Data%20Mining/Chatbot%20UAS/Bot-UAS_Datamining/app/main.py) $\rightarrow$ `st.chat_message()` | Menampilkan balon percakapan, badge metadata, dan menyimpan pesan ke `st.session_state`. | Objek Respon & Metadata | Tampilan Web Browser Rendered |
+
+---
+
+## 5. Paradigma Dual-Stage: Turnamen Model (Offline) vs Inferensi Operasional (Online)
+
+Salah satu pertanyaan paling fundamental dalam arsitektur Machine Learning sistem ini adalah: **"Apakah ketiga model diuji setiap kali user mengetik pesan, atau bagaimana sistem memilih model?"**
+
+Sistem ini menerapkan paradigma **Dual-Stage Machine Learning Architecture**:
+
+```text
+  ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+  ║ TAHAP 1: TURNAMEN SELEKSI MODEL (OFFLINE EXPERIMENTATION - scripts/run_experiments.py)        ║
+  ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+     Dataset Uji (Test Split)
+           │
+           ├──► [ Evaluasi Model A: Multinomial Naive Bayes ]  ──► Macro F1: 1.0000 (Prob. Rata)
+           ├──► [ Evaluasi Model B: Logistic Regression ]      ──► Macro F1: 1.0000 (Prob. Sedang)
+           └──► [ Evaluasi Model C: Calibrated Linear SVM ]    ──► Macro F1: 1.0000 (Prob. Tajam & Tegas)
+                                                                            │
+                                                                            ▼
+                                                             [ PEMILIHAN MODEL TERBAIK ]
+                                                             Juara: Calibrated Linear SVM
+                                                                            │
+                                                                            ▼
+                                                      Serialisasi Model ke: models/best_model.joblib
+
+                                            ══════════════════
+
+  ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+  ║ TAHAP 2: INFERENSI OPERASIONAL REAL-TIME (ONLINE PRODUCTION CHAT - app/main.py)               ║
+  ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+     Input Chat User: "Berapa biaya pendaftaran?"
+           │
+           ▼
+     [ TextPreprocessor ] ──► "berapa biaya daftar"
+           │
+           ▼
+     [ TF-IDF Vectorizer ] ──► Sparse Matrix [1 x 5000]
+           │
+           ▼
+     [ MODEL TUNGGAL TERBAIK (.joblib) ]  <── Hanya 1 model juara yang aktif di memori RAM!
+           │
+           ▼
+     Hasil Prediksi: "biaya_pendaftaran" (Confidence: 77.17%) ──► Respon UI Instan (< 50 milidetik)
+```
+
+### Mengapa Pendekatan Model Selection Dipilih (Bukan Ensemble Voting)?
+1. **Kecepatan Inferensi Super Cepat (*Low Latency*):** Menjalankan 1 model tunggal terbaik di memori membutuhkan waktu kurang dari 50 milidetik per request, dibandingkan menjalankan 3 model sekaligus secara paralel.
+2. **Efisiensi Memori Server:** RAM server tidak terbebani oleh pemuatan banyak model yang redundan.
+3. **Reproducibility & Auditabilitas Riset:** Pilihan model didasarkan pada data empiris pengujian matriks eksperimen E0 s/d E6 yang tercatat transparan di `reports/metrics/experiment_results.json`.
+
