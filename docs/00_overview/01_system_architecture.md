@@ -112,47 +112,40 @@ Bagian ini membedah secara mendalam proses komputasi yang terjadi di balik layar
 
 ```mermaid
 flowchart TD
-    Start([Pengguna Menginput Kalimat]) --> InputUI["app/main.py: st.chat_input()"]
+    Start(["Pengguna Menginput Kalimat"]) --> InputUI["app/main.py: st.chat_input()"]
     
-    subgraph S1_PREPROCESSING ["FASE 1: NLP PREPROCESSING (src/preprocessing.py)"]
-        InputUI --> Step1["TextPreprocessor.clean_text()\n- Case folding (lowercase)\n- Hapus URL, tanda baca, simbol, angka\n- Normalisasi spasi berlebih"]
-        Step1 --> Step2["TextPreprocessor.normalize_slang()\n- Lookup kamus DEFAULT_SLANG_DICT\n- 'brp' -> 'berapa', 'bya' -> 'biaya', 'dftr' -> 'daftar'"]
-        Step2 --> Step3["TextPreprocessor.remove_stopwords()\n- Filter kata hubung umum yang tidak bermakna intent\n- Pertahankan kata kunci pertanyaan"]
-        Step3 --> CleanText[/"Output Bersih: 'berapa biaya daftar mahasiswa baru'"/]
+    subgraph S1["FASE 1: NLP PREPROCESSING (src/preprocessing.py)"]
+        InputUI --> Step1["TextPreprocessor.clean_text()<br/>- Case folding (lowercase)<br/>- Hapus URL, tanda baca, simbol, angka<br/>- Normalisasi spasi berlebih"]
+        Step1 --> Step2["TextPreprocessor.normalize_slang()<br/>- Lookup kamus DEFAULT_SLANG_DICT<br/>- 'brp' -> 'berapa', 'bya' -> 'biaya', 'dftr' -> 'daftar'"]
+        Step2 --> Step3["TextPreprocessor.remove_stopwords()<br/>- Filter kata hubung umum yang tidak bermakna intent<br/>- Pertahankan kata kunci pertanyaan"]
+        Step3 --> CleanText["Output Bersih: 'berapa biaya daftar mahasiswa baru'"]
     end
 
-    subgraph S2_FEATURE_EXTRACTION ["FASE 2: EKSTRAKSI FITUR (src/feature_extraction.py)"]
-        CleanText --> TFIDF["FeatureExtractor.transform()\n- Hitung Term Frequency (TF)\n- Kalikan bobot Inverse Document Frequency (IDF)\n- Ekstraksi Unigram + Bigram (1,2)\n- Terapkan Sublinear Scaling: 1 + log(TF)"]
-        TFIDF --> SparseVector[/"Matriks Fitur Numerik: Sparse Matrix [1 x 5000]"/]
+    subgraph S2["FASE 2: EKSTRAKSI FITUR (src/feature_extraction.py)"]
+        CleanText --> TFIDF["FeatureExtractor.transform()<br/>- Hitung Term Frequency (TF)<br/>- Kalikan bobot Inverse Document Frequency (IDF)<br/>- Ekstraksi Unigram + Bigram (1,2)<br/>- Terapkan Sublinear Scaling: 1 + log(TF)"]
+        TFIDF --> SparseVector["Matriks Fitur Numerik: Sparse Matrix [1 x 5000]"]
     end
 
-    subgraph S3_INFERENCE ["FASE 3: INFERENSI & KALIBRASI (src/models.py)"]
-        SparseVector --> SVM["LinearSVC.decision_function()\n- Hitung jarak sampel ke Hyperplane: f(x) = w^T x + b"]
-        SVM --> PlattScaling["CalibratedClassifierCV (Platt Scaling)\n- Transformasi Sigmoid Logistik:\n  P(c|x) = 1 / (1 + exp(A * f(x) + B))"]
-        PlattScaling --> ProbDist[/"Distribusi Probabilitas Kelas P = [p1, p2, ..., pK]"/]
-        ProbDist --> ArgMax["Evaluasi Puncak Keyakinan:\n- Max Confidence: max_prob = max(P)\n- Predicted Intent: c* = argmax(P)"]
+    subgraph S3["FASE 3: INFERENSI & KALIBRASI (src/models.py)"]
+        SparseVector --> SVM["LinearSVC.decision_function()<br/>- Hitung jarak sampel ke Hyperplane: f(x) = w^T x + b"]
+        SVM --> PlattScaling["CalibratedClassifierCV (Platt Scaling)<br/>- Transformasi Sigmoid Logistik:<br/>P(c|x) = 1 / (1 + exp(A * f(x) + B))"]
+        PlattScaling --> ProbDist["Distribusi Probabilitas Kelas P = [p1, p2, ..., pK]"]
+        ProbDist --> ArgMax["Evaluasi Puncak Keyakinan:<br/>- Max Confidence: max_prob = max(P)<br/>- Predicted Intent: c* = argmax(P)"]
     end
 
-    subgraph S4_OOS_GATE ["FASE 4: OOS FILTER & KNOWLEDGE MATCHING (app/main.py)"]
-        ArgMax --> OOSCheck{"Apakah max_prob >= OOS_Threshold?\n(Default: 0.50 / 50%)"}
+    subgraph S4["FASE 4: OOS FILTER & KNOWLEDGE MATCHING (app/main.py)"]
+        ArgMax --> OOSCheck{"Apakah max_prob >= OOS_Threshold?<br/>(Default: 0.50 / 50%)"}
         
-        OOSCheck -- "TIDAK (Confidence Rendah / Pertanyaan Acak)" --> OOSBranch["Set Intent = 'OOS_REJECTED'\nSet is_oos = True\nAmbil Template Penolakan Sopan"]
-        OOSCheck -- "YA (Confidence Tinggi / In-Scope)" --> InScopeBranch["Set Intent = c*\nSet is_oos = False\nAmbil Jawaban Informatif dari INTENT_RESPONSES[c*]"]
+        OOSCheck -- "TIDAK (Confidence Rendah)" --> OOSBranch["Set Intent = 'OOS_REJECTED'<br/>Set is_oos = True<br/>Ambil Template Penolakan Sopan"]
+        OOSCheck -- "YA (Confidence Tinggi)" --> InScopeBranch["Set Intent = c*<br/>Set is_oos = False<br/>Ambil Jawaban Informatif dari INTENT_RESPONSES[c*]"]
     end
 
-    subgraph S5_PRESENTATION ["FASE 5: PENYAJIAN & STATE MANAGEMENT (app/main.py)"]
-        OOSBranch --> RenderUI["Render Pesan Bot di UI:\n- st.chat_message('assistant')\n- Render Teks Balasan\n- Render Badge Intent & Skor Confidence %"]
+    subgraph S5["FASE 5: PENYAJIAN & STATE MANAGEMENT (app/main.py)"]
+        OOSBranch --> RenderUI["Render Pesan Bot di UI:<br/>- st.chat_message('assistant')<br/>- Render Teks Balasan<br/>- Render Badge Intent & Skor Confidence %"]
         InScopeBranch --> RenderUI
-        RenderUI --> AppendHistory["Update Session State:\nst.session_state.messages.append()\n(Menyimpan riwayat obrolan di memori)"]
-        AppendHistory --> End([Selesai / Menunggu Input Berikutnya])
+        RenderUI --> AppendHistory["Update Session State:<br/>st.session_state.messages.append()<br/>(Menyimpan riwayat obrolan di memori)"]
+        AppendHistory --> End(["Selesai / Menunggu Input Berikutnya"])
     end
-
-    classDef phase fill:#f8f9fa,stroke:#1e88e5,stroke-width:2px;
-    classDef io fill:#e3f2fd,stroke:#1565c0,stroke-width:1px;
-    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    class S1_PREPROCESSING,S2_FEATURE_EXTRACTION,S3_INFERENCE,S4_OOS_GATE,S5_PRESENTATION phase;
-    class CleanText,SparseVector,ProbDist io;
-    class OOSCheck decision;
 ```
 
 ---
